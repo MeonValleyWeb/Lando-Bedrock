@@ -1,0 +1,101 @@
+name: my-bedrock-site
+recipe: lemp
+config:
+  webroot: bedrock/web
+  php: "8.2"
+  database: mysql
+  xdebug: true
+
+services:
+  database:
+    type: mysql:8.0
+  phpmyadmin:
+    type: phpmyadmin
+    hosts:
+      - database
+  mailhog:
+    type: mailhog
+    image: mailhog/mailhog:latest@sha256:... # ARM64 compatible image hash
+    platform: linux/arm64
+    portforward: true
+    hogfrom:
+      - appserver
+  appserver:
+    overrides:
+      environment:
+        - COMPOSER_MEMORY_LIMIT=-1
+      volumes:
+        - ./nginx.conf:/opt/bitnami/nginx/conf/server_blocks/wordpress.conf:ro
+        - ./php.ini:/opt/bitnami/php/etc/conf.d/99-custom.ini:ro
+    build_as_root:
+      - apt-get update && apt-get install -y unzip curl git
+      - apt-get install -y jq
+      - curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+      - chmod +x wp-cli.phar
+      - mv wp-cli.phar /usr/local/bin/wp
+    run_as_root:
+      - chown -R www-data:www-data /app
+      - ln -snf /usr/share/zoneinfo/Europe/London /etc/localtime
+      - echo "Europe/London" > /etc/timezone
+    pma:
+      type: phpmyadmin
+
+tooling:
+  composer:
+    service: appserver
+    cmd: composer
+
+  wp:
+    service: appserver
+    cmd: wp
+    dir: /app/bedrock
+
+proxy:
+  appserver_nginx:
+    - wp-starter.local
+  phpmyadmin:
+    - pma.wp-starter.local
+
+events:
+  pre-start:
+  - "if [ ! -d 'bedrock' ]; then composer create-project roots/bedrock bedrock; fi"
+  - "cp bedrock/.env.example bedrock/.env"
+  - |
+    # Create a temporary script to handle the environment variable replacement
+    cat > update_env.sh << 'EOL'
+    #!/bin/bash
+    
+    # Extract DB credentials from LANDO_INFO
+    DB_HOST=$(echo $LANDO_INFO | jq -r '.database.internal_connection.host')
+    DB_NAME=$(echo $LANDO_INFO | jq -r '.database.creds.database')
+    DB_USER=$(echo $LANDO_INFO | jq -r '.database.creds.user')
+    DB_PASSWORD=$(echo $LANDO_INFO | jq -r '.database.creds.password')
+    
+    # Update the .env file with Lando variables
+    perl -i -pe "s/DB_NAME=.*/DB_NAME=$DB_NAME/" bedrock/.env
+    perl -i -pe "s/DB_USER=.*/DB_USER=$DB_USER/" bedrock/.env
+    perl -i -pe "s/DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" bedrock/.env
+    
+    # Check if DB_HOST is commented and uncomment it, or update it if already uncommented
+    if grep -q "^# DB_HOST=" bedrock/.env; then
+      perl -i -pe "s/^# DB_HOST=.*/DB_HOST=$DB_HOST/" bedrock/.env
+    else
+      perl -i -pe "s/DB_HOST=.*/DB_HOST=$DB_HOST/" bedrock/.env
+    fi
+    
+    # Uncomment and set DB_PREFIX if it's commented
+    if grep -q "^# DB_PREFIX=" bedrock/.env; then
+      perl -i -pe 's/^# DB_PREFIX=.*/DB_PREFIX=wp_/' bedrock/.env
+    fi
+    
+    # Set the WP_HOME and WP_SITEURL values
+    SITE_URL="https://wp-starter.local"
+    perl -i -pe "s|WP_HOME=.*|WP_HOME=$SITE_URL|" bedrock/.env
+    perl -i -pe "s|WP_SITEURL=.*|WP_SITEURL=$SITE_URL/wp|" bedrock/.env
+    EOL
+  - "chmod +x update_env.sh && ./update_env.sh && rm update_env.sh"
+  - "cp -f nginx.conf bedrock/web/nginx.conf"
+
+post-start:
+  - "cd bedrock && composer install"
+  - "lando wp core install --url=https://wp-starter.local --title='Bedrock WP' --admin_user=admin --admin_password=admin --admin_email=admin@wp-starter.local"
