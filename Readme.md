@@ -21,6 +21,7 @@ This setup provides a complete LEMP (Linux, Nginx, MySQL, PHP) stack for local W
 - [Lando](https://docs.lando.dev/getting-started/installation.html)
 - [Composer](https://getcomposer.org/download/)
 - Git
+- jq (JSON processor, required for automatic environment variable configuration)
 
 ## Getting Started
 
@@ -118,8 +119,9 @@ lando rebuild
 
 1. This is a **development environment only** and should not be used for production.
 2. The `.env` file is automatically configured with database credentials from Lando.
-3. Custom fields in Bedrock architecture can be managed through [Advanced Custom Fields](https://www.advancedcustomfields.com/) or similar plugins.
-4. The REST API is configured to allow cross-origin requests, which is useful for headless WordPress setups.
+3. The setup installs jq in the container for parsing Lando environment variables, which is crucial for automatic database configuration.
+4. Custom fields in Bedrock architecture can be managed through [Advanced Custom Fields](https://www.advancedcustomfields.com/) or similar plugins.
+5. The REST API is configured to allow cross-origin requests, which is useful for headless WordPress setups.
 
 ## Customization
 
